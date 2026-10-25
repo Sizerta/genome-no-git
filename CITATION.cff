@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+title: "The genome has no .git directory"
+message: "If you refer to this, please cite it as below."
+type: article
+authors:
+  - given-names: "Masoud"
+    family-names: "Mahdavifar"
+    orcid: "https://orcid.org/0000-0002-8602-8092"
+abstract: >-
+  An introduction to ancestral recombination graphs and coalescent genealogies
+  for readers who already have version-control intuition, with an interactive
+  simulated example and measurements of where the analogy fails.
+keywords:
+  - population genetics
+  - ancestral recombination graph
+  - coalescent
+  - tskit
+  - science communication
+repository-code: "https://github.com/sizerta/genome-no-git"
+url: "https://sizerta.github.io/genome-no-git/"
+year: 2026
+license: CC-BY-4.0
