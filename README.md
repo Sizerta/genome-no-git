@@ -449,10 +449,6 @@ little on the table — held everywhere I looked.
 
 ## Acknowledgements
 
-<!-- Add a line here for anyone whose framing, correction or refinement ended up in the
-     text. Naming a specific contribution costs one line and settles the question
-     permanently. -->
-
 The simulations use [`msprime`](https://tskit.dev/msprime/) and
 [`tskit`](https://tskit.dev), both of which are excellent and neither of which I wrote.
 
