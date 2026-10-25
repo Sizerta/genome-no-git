@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="An interactive coalescent genealogy: drag along a 50 kb genome and watch every variant resolve into a mutation on one branch of a local tree.">
+<style>
+  :root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+  body{margin:0;font:14px system-ui,sans-serif}
+  img{max-width:100%}
+  [hidden]{display:none!important}
+</style>
+<title>A SNP Is an Edge</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one genome coordinate drives a stack of linked panels - ruler, local tree,
+   variant matrix, pairwise coalescence. Instrument panel, not an essay. */
+:root{
+  --bg:#fcfcfb; --surface:#ffffff; --sunk:#f4f4f1;
+  --ink:#1c1c1a; --ink-2:#4a4a45; --ink-3:#76766e;
+  --rule:#dededa; --rule-2:#ebebe7;
+  --derived:#C2710A; --accent:#4059AD; --changed:#B03A6E;
+  --accent-wash:rgba(64,89,173,.11); --derived-wash:rgba(194,113,10,.14);
+  --serif:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#1a1a19; --surface:#232322; --sunk:#141413;
+  --ink:#eeeeea; --ink-2:#b9b9b2; --ink-3:#8b8b83;
+  --rule:#3a3a37; --rule-2:#2c2c2a;
+  --derived:#C47F26; --accent:#6480D6; --changed:#C25F8C;
+  --accent-wash:rgba(100,128,214,.18); --derived-wash:rgba(196,127,38,.2);
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#1a1a19; --surface:#232322; --sunk:#141413;
+  --ink:#eeeeea; --ink-2:#b9b9b2; --ink-3:#8b8b83;
+  --rule:#3a3a37; --rule-2:#2c2c2a;
+  --derived:#C47F26; --accent:#6480D6; --changed:#C25F8C;
+  --accent-wash:rgba(100,128,214,.18); --derived-wash:rgba(196,127,38,.2);
+  color-scheme:dark;
+}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0}
+.wrap{max-width:1080px;margin:0 auto;padding-block:32px 56px}
+h1{font-family:var(--serif);font-weight:600;font-size:clamp(1.75rem,4.2vw,2.6rem);
+  line-height:1.12;margin:0 0 .5rem;text-wrap:balance;letter-spacing:-.015em}
+.stand{color:var(--ink-2);font-size:1.02rem;max-width:62ch;margin:0 0 1.75rem}
+.stand b{color:var(--ink);font-weight:600}
+h2{font-family:var(--serif);font-weight:600;font-size:1.12rem;margin:0 0 .15rem;letter-spacing:-.01em}
+.eyebrow{font-family:var(--mono);font-size:.69rem;text-transform:uppercase;
+  letter-spacing:.11em;color:var(--ink-3);margin:0 0 .45rem}
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  padding:16px 18px 18px;margin-bottom:14px}
+.ctl{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:flex-end;margin-bottom:14px}
+.ctl label{display:block;font-family:var(--mono);font-size:.68rem;text-transform:uppercase;
+  letter-spacing:.09em;color:var(--ink-3);margin-bottom:5px}
+input[type=range]{width:min(320px,100%);accent-color:var(--accent);display:block}
+select,button{font-family:var(--sans);font-size:.88rem;color:var(--ink);
+  background:var(--sunk);border:1px solid var(--rule);border-radius:3px;padding:5px 8px}
+button{cursor:pointer}
+button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.readout{font-family:var(--mono);font-size:.84rem;color:var(--ink-2);
+  font-variant-numeric:tabular-nums;display:flex;gap:18px;flex-wrap:wrap}
+.readout b{color:var(--ink);font-weight:500}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+@media (max-width:760px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.svgbox{overflow-x:auto}
+svg{display:block;width:100%;height:auto;max-width:100%}
+#ruler,#pair{min-width:620px}
+.note{font-size:.85rem;color:var(--ink-3);margin:.6rem 0 0;max-width:60ch}
+.note b{color:var(--ink-2);font-weight:500}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:.7rem;
+  color:var(--ink-2);margin-top:10px;align-items:center}
+.legend i{width:11px;height:11px;border-radius:2px;display:inline-block;margin-right:5px;
+  vertical-align:-1px}
+ol.steps{list-style:none;counter-reset:s;padding:0;margin:0;display:grid;gap:18px}
+ol.steps li{counter-increment:s;display:grid;grid-template-columns:2.1rem minmax(0,1fr);gap:2px 12px}
+ol.steps li::before{content:counter(s);font-family:var(--mono);font-size:.78rem;
+  color:var(--accent);border-top:2px solid var(--accent);padding-top:5px;font-variant-numeric:tabular-nums}
+ol.steps h3{font-family:var(--sans);font-size:.95rem;font-weight:600;margin:0 0 .2rem;grid-column:2}
+ol.steps p{margin:0;grid-column:2;color:var(--ink-2);font-size:.92rem;max-width:60ch}
+ol.steps p code,.note code,.stand code{font-family:var(--mono);font-size:.86em;
+  background:var(--sunk);padding:.08em .3em;border-radius:2px;color:var(--ink)}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--rule);
+  font-size:.86rem;color:var(--ink-3);max-width:64ch}
+.foot a{color:var(--accent)}
+@media (prefers-reduced-motion:no-preference){
+  .hl{transition:opacity .12s ease}
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <h1>A SNP is an edge</h1>
+  <p class="stand">Eight haplotypes, <b>50,000 bp</b>, simulated under the coalescent with recombination.
+  Drag the position marker and watch the genealogy change. Every variant in your genotype matrix is a
+  mutation sitting on one branch, carried by exactly the samples beneath it. That is the whole idea
+  behind ancestral recombination graphs, and this page is the same data shown as a tree and as a matrix
+  at the same time.</p>
+
+  <div class="panel">
+    <p class="eyebrow">Genome position</p>
+    <div class="ctl">
+      <div><label for="pos">Coordinate (bp)</label>
+        <input type="range" id="pos" min="0" max="50000" step="1" value="26000"></div>
+      <div><label for="tscale">Time axis</label>
+        <button id="tscale" aria-pressed="true">square root</button></div>
+    </div>
+    <div class="svgbox"><svg id="ruler" viewBox="0 0 900 104" role="img"
+      aria-label="Genome ruler showing local tree intervals and variant positions"></svg></div>
+    <div class="readout" id="ro"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <p class="eyebrow">Local tree</p>
+      <h2>The genealogy at this coordinate</h2>
+      <div class="svgbox"><svg id="tree" viewBox="0 0 470 372" role="img"
+        aria-label="Local coalescent tree with mutations marked on branches"></svg></div>
+      <p class="note" id="treenote"></p>
+    </div>
+    <div class="panel">
+      <p class="eyebrow">Variant matrix</p>
+      <h2>The same thing as genotypes</h2>
+      <div class="svgbox"><svg id="mat" viewBox="0 0 470 248" role="img"
+        aria-label="Genotype matrix of 8 samples by 35 variant sites"></svg></div>
+      <p class="note" id="matnote">Hover a column to light up its branch in the tree. Click to jump there.</p>
+      <div class="legend">
+        <span><i style="background:var(--derived)"></i>derived allele</span>
+        <span><i style="background:var(--sunk);border:1px solid var(--rule)"></i>ancestral</span>
+        <span><i style="background:var(--accent)"></i>in the current tree</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="eyebrow">Pairwise coalescence</p>
+    <h2>When do two haplotypes share an ancestor?</h2>
+    <div class="ctl">
+      <div><label for="sa">Sample A</label><select id="sa"></select></div>
+      <div><label for="sb">Sample B</label><select id="sb"></select></div>
+    </div>
+    <div class="svgbox"><svg id="pair" viewBox="0 0 900 208" role="img"
+      aria-label="Time to most recent common ancestor for the selected pair across the genome"></svg></div>
+    <p class="note" id="pairnote"></p>
+  </div>
+
+  <h2 style="font-size:1.3rem;margin:34px 0 16px">What to take from it</h2>
+  <ol class="steps">
+    <li><h3>One coordinate, one tree</h3>
+      <p>At any single base, the eight haplotypes have exactly one genealogy. Samples sit along the
+      bottom, time runs upward in generations before the present. Coalescence times are heavily
+      skewed, which is why the axis defaults to a square root. Switch it to linear and most of the
+      structure piles up near zero. That skew is real coalescent behaviour, not a drawing artefact.</p></li>
+    <li><h3>A mutation lives on a branch</h3>
+      <p>Place a mutation on an edge and every sample below it inherits the derived allele. That
+      carrier set <em>is</em> a column of the genotype matrix. Allele frequency is just the fraction
+      of samples under the branch, so a mutation high in the tree is common and one near a leaf is
+      a singleton. Hover any column on the right to see its branch on the left.</p></li>
+    <li><h3>Recombination edits the tree, it does not replace it</h3>
+      <p>Move the marker across a breakpoint and the topology changes, but only slightly. This
+      genome has <b>7 local trees drawn from 20 nodes</b>, and adjacent trees differ
+      at only <b>4 to 5 nodes</b>. Store the edits rather than the trees and a
+      genealogy for half a million people fits in memory. That is what a tree sequence is, and why
+      <code>tskit</code> exists.</p></li>
+    <li><h3>Linkage is tree similarity</h3>
+      <p>Two mutations on the same branch have identical carrier sets, so they are in perfect LD, at
+      any physical distance. Two mutations in different local trees have carrier sets that no longer
+      match. LD decay along a chromosome is the genealogy being rewritten as you walk. The
+      correlation matrix you normally estimate from genotypes is a downstream summary of this.</p></li>
+    <li><h3>Relatedness is a local quantity</h3>
+      <p>Pick two samples and look at the bottom panel. Their time to a common ancestor jumps at
+      every breakpoint. Average it along the genome and you have one entry of the relatedness matrix
+      that goes into a mixed model. The genome-wide number hides the variation you can see here, and
+      that variation is why self-relatedness differs between individuals.</p></li>
+  </ol>
+
+  <p class="foot">Simulated with <code>msprime</code>: eight sample haplotypes, N<sub>e</sub> = 10,000,
+  50 kb, recombination 2.5&times;10<sup>&minus;9</sup>, mutation 5.8&times;10<sup>&minus;9</sup> per base
+  per generation. 35 segregating sites, 35 edges. The topology is a genuine coalescent
+  simulation, so the uneven branch lengths and the wandering TMRCA are what the model actually
+  produces. Further reading: Nielsen, Vaughn &amp; Deng,
+  <a href="https://nielsen-lab.github.io/pdfs/papers/argreview.pdf">Nature Reviews Genetics</a> 26:47&ndash;58 (2025).</p>
+</div>
+<script id="argdata" type="application/json">{"n_samples": 8, "seq_len": 50000, "Ne": 10000, "seed": 253, "sample_ids": [0, 1, 2, 3, 4, 5, 6, 7], "breakpoints": [0.0, 4442.0, 23397.0, 24003.0, 36613.0, 39788.0, 44767.0, 50000.0], "trees": [{"left": 0.0, "right": 4442.0, "nodes": [{"id": 0, "x": 0, "y": 0.0, "is_sample": true, "parent": 15, "n_below": 1}, {"id": 1, "x": 1, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 2, "x": 2, "y": 0.0, "is_sample": true, "parent": 8, "n_below": 1}, {"id": 3, "x": 3, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 4, "x": 4, "y": 0.0, "is_sample": true, "parent": 8, "n_below": 1}, {"id": 5, "x": 5, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 6, "x": 6, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 7, "x": 7, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 8, "x": 3.0, "y": 711.7595821228797, "is_sample": false, "parent": 9, "n_below": 2}, {"id": 9, "x": 3.0, "y": 746.085851762401, "is_sample": false, "parent": 11, "n_below": 3}, {"id": 10, "x": 6.0, "y": 861.737158309724, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 11, "x": 4.5, "y": 1189.5701655720245, "is_sample": false, "parent": 15, "n_below": 5}, {"id": 13, "x": 3.5, "y": 7792.91240228878, "is_sample": false, "parent": 18, "n_below": 2}, {"id": 15, "x": 2.25, "y": 15683.305439019188, "is_sample": false, "parent": 18, "n_below": 6}, {"id": 18, "x": 2.875, "y": 34688.06810387311, "is_sample": false, "parent": null, "n_below": 8}], "mutations": [{"pos": 1194.0, "node": 15, "derived": "A", "anc": "C"}, {"pos": 2940.0, "node": 6, "derived": "A", "anc": "G"}], "tmrca": 34688.06810387311, "total_branch_length": 96361.50680682121, "changed_nodes": null}, {"left": 4442.0, "right": 23397.0, "nodes": [{"id": 0, "x": 0, "y": 0.0, "is_sample": true, "parent": 16, "n_below": 1}, {"id": 1, "x": 1, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 2, "x": 2, "y": 0.0, "is_sample": true, "parent": 8, "n_below": 1}, {"id": 3, "x": 3, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 4, "x": 4, "y": 0.0, "is_sample": true, "parent": 8, "n_below": 1}, {"id": 5, "x": 5, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 6, "x": 6, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 7, "x": 7, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 8, "x": 3.0, "y": 711.7595821228797, "is_sample": false, "parent": 9, "n_below": 2}, {"id": 9, "x": 3.0, "y": 746.085851762401, "is_sample": false, "parent": 11, "n_below": 3}, {"id": 10, "x": 6.0, "y": 861.737158309724, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 11, "x": 4.5, "y": 1189.5701655720245, "is_sample": false, "parent": 18, "n_below": 5}, {"id": 13, "x": 3.5, "y": 7792.91240228878, "is_sample": false, "parent": 16, "n_below": 2}, {"id": 16, "x": 1.75, "y": 22368.072544880455, "is_sample": false, "parent": 18, "n_below": 3}, {"id": 18, "x": 3.125, "y": 34688.06810387311, "is_sample": false, "parent": null, "n_below": 8}], "mutations": [{"pos": 8741.0, "node": 13, "derived": "T", "anc": "G"}, {"pos": 11604.0, "node": 1, "derived": "G", "anc": "T"}, {"pos": 20073.0, "node": 11, "derived": "A", "anc": "G"}, {"pos": 20299.0, "node": 0, "derived": "C", "anc": "T"}, {"pos": 20578.0, "node": 0, "derived": "G", "anc": "C"}, {"pos": 22843.0, "node": 13, "derived": "G", "anc": "T"}], "tmrca": 34688.06810387311, "total_branch_length": 103046.27391268252, "changed_nodes": [0, 11, 13, 15, 16]}, {"left": 23397.0, "right": 24003.0, "nodes": [{"id": 0, "x": 0, "y": 0.0, "is_sample": true, "parent": 14, "n_below": 1}, {"id": 1, "x": 1, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 2, "x": 2, "y": 0.0, "is_sample": true, "parent": 14, "n_below": 1}, {"id": 3, "x": 3, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 4, "x": 4, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 5, "x": 5, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 6, "x": 6, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 7, "x": 7, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 9, "x": 3.5, "y": 746.085851762401, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 10, "x": 6.0, "y": 861.737158309724, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 11, "x": 4.75, "y": 1189.5701655720245, "is_sample": false, "parent": 18, "n_below": 4}, {"id": 13, "x": 3.5, "y": 7792.91240228878, "is_sample": false, "parent": 16, "n_below": 2}, {"id": 14, "x": 1.0, "y": 9391.852297737321, "is_sample": false, "parent": 16, "n_below": 2}, {"id": 16, "x": 2.25, "y": 22368.072544880455, "is_sample": false, "parent": 18, "n_below": 4}, {"id": 18, "x": 3.5, "y": 34688.06810387311, "is_sample": false, "parent": null, "n_below": 8}], "mutations": [{"pos": 23937.0, "node": 6, "derived": "A", "anc": "T"}], "tmrca": 34688.06810387311, "total_branch_length": 111726.36662829695, "changed_nodes": [0, 2, 4, 8, 14]}, {"left": 24003.0, "right": 36613.0, "nodes": [{"id": 0, "x": 0, "y": 0.0, "is_sample": true, "parent": 14, "n_below": 1}, {"id": 1, "x": 1, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 2, "x": 2, "y": 0.0, "is_sample": true, "parent": 14, "n_below": 1}, {"id": 3, "x": 3, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 4, "x": 4, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 5, "x": 5, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 6, "x": 6, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 7, "x": 7, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 9, "x": 3.5, "y": 746.085851762401, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 10, "x": 6.0, "y": 861.737158309724, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 11, "x": 4.75, "y": 1189.5701655720245, "is_sample": false, "parent": 18, "n_below": 4}, {"id": 13, "x": 3.5, "y": 7792.91240228878, "is_sample": false, "parent": 19, "n_below": 2}, {"id": 14, "x": 1.0, "y": 9391.852297737321, "is_sample": false, "parent": 18, "n_below": 2}, {"id": 18, "x": 2.875, "y": 34688.06810387311, "is_sample": false, "parent": 19, "n_below": 6}, {"id": 19, "x": 3.1875, "y": 42923.79783658233, "is_sample": false, "parent": null, "n_below": 8}], "mutations": [{"pos": 26324.0, "node": 0, "derived": "A", "anc": "C"}, {"pos": 27354.0, "node": 2, "derived": "A", "anc": "G"}, {"pos": 27655.0, "node": 11, "derived": "A", "anc": "G"}, {"pos": 29394.0, "node": 6, "derived": "A", "anc": "C"}, {"pos": 29720.0, "node": 18, "derived": "A", "anc": "C"}, {"pos": 29791.0, "node": 14, "derived": "C", "anc": "T"}, {"pos": 30865.0, "node": 14, "derived": "G", "anc": "T"}, {"pos": 32996.0, "node": 0, "derived": "G", "anc": "A"}, {"pos": 34295.0, "node": 14, "derived": "G", "anc": "T"}, {"pos": 35568.0, "node": 11, "derived": "A", "anc": "C"}, {"pos": 35605.0, "node": 11, "derived": "A", "anc": "C"}, {"pos": 36112.0, "node": 13, "derived": "C", "anc": "T"}, {"pos": 36378.0, "node": 0, "derived": "C", "anc": "A"}], "tmrca": 42923.79783658233, "total_branch_length": 140517.82165270802, "changed_nodes": [13, 14, 16, 18]}, {"left": 36613.0, "right": 39788.0, "nodes": [{"id": 0, "x": 0, "y": 0.0, "is_sample": true, "parent": 14, "n_below": 1}, {"id": 1, "x": 1, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 2, "x": 2, "y": 0.0, "is_sample": true, "parent": 14, "n_below": 1}, {"id": 3, "x": 3, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 4, "x": 4, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 5, "x": 5, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 6, "x": 6, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 7, "x": 7, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 9, "x": 3.5, "y": 746.085851762401, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 10, "x": 6.0, "y": 861.737158309724, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 11, "x": 4.75, "y": 1189.5701655720245, "is_sample": false, "parent": 17, "n_below": 4}, {"id": 13, "x": 3.5, "y": 7792.91240228878, "is_sample": false, "parent": 17, "n_below": 2}, {"id": 14, "x": 1.0, "y": 9391.852297737321, "is_sample": false, "parent": 18, "n_below": 2}, {"id": 17, "x": 4.125, "y": 28041.306781707004, "is_sample": false, "parent": 18, "n_below": 6}, {"id": 18, "x": 2.5625, "y": 34688.06810387311, "is_sample": false, "parent": null, "n_below": 8}], "mutations": [{"pos": 37905.0, "node": 13, "derived": "T", "anc": "C"}, {"pos": 38012.0, "node": 17, "derived": "C", "anc": "A"}, {"pos": 38487.0, "node": 14, "derived": "C", "anc": "A"}], "tmrca": 34688.06810387311, "total_branch_length": 117399.6008651235, "changed_nodes": [11, 13, 17, 18]}, {"left": 39788.0, "right": 44767.0, "nodes": [{"id": 0, "x": 0, "y": 0.0, "is_sample": true, "parent": 14, "n_below": 1}, {"id": 1, "x": 1, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 2, "x": 2, "y": 0.0, "is_sample": true, "parent": 14, "n_below": 1}, {"id": 3, "x": 3, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 4, "x": 4, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 5, "x": 5, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 6, "x": 6, "y": 0.0, "is_sample": true, "parent": 13, "n_below": 1}, {"id": 7, "x": 7, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 9, "x": 3.5, "y": 746.085851762401, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 10, "x": 6.0, "y": 861.737158309724, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 11, "x": 4.75, "y": 1189.5701655720245, "is_sample": false, "parent": 18, "n_below": 4}, {"id": 13, "x": 3.5, "y": 7792.91240228878, "is_sample": false, "parent": 19, "n_below": 2}, {"id": 14, "x": 1.0, "y": 9391.852297737321, "is_sample": false, "parent": 18, "n_below": 2}, {"id": 18, "x": 2.875, "y": 34688.06810387311, "is_sample": false, "parent": 19, "n_below": 6}, {"id": 19, "x": 3.1875, "y": 42923.79783658233, "is_sample": false, "parent": null, "n_below": 8}], "mutations": [{"pos": 41016.0, "node": 6, "derived": "C", "anc": "A"}, {"pos": 41757.0, "node": 13, "derived": "T", "anc": "G"}, {"pos": 41808.0, "node": 11, "derived": "A", "anc": "C"}, {"pos": 42232.0, "node": 14, "derived": "G", "anc": "C"}, {"pos": 43350.0, "node": 11, "derived": "G", "anc": "A"}], "tmrca": 42923.79783658233, "total_branch_length": 140517.82165270805, "changed_nodes": [11, 13, 17, 18]}, {"left": 44767.0, "right": 50000.0, "nodes": [{"id": 0, "x": 0, "y": 0.0, "is_sample": true, "parent": 12, "n_below": 1}, {"id": 1, "x": 1, "y": 0.0, "is_sample": true, "parent": 12, "n_below": 1}, {"id": 2, "x": 2, "y": 0.0, "is_sample": true, "parent": 14, "n_below": 1}, {"id": 3, "x": 3, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 4, "x": 4, "y": 0.0, "is_sample": true, "parent": 9, "n_below": 1}, {"id": 5, "x": 5, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 6, "x": 6, "y": 0.0, "is_sample": true, "parent": 19, "n_below": 1}, {"id": 7, "x": 7, "y": 0.0, "is_sample": true, "parent": 10, "n_below": 1}, {"id": 9, "x": 3.5, "y": 746.085851762401, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 10, "x": 6.0, "y": 861.737158309724, "is_sample": false, "parent": 11, "n_below": 2}, {"id": 11, "x": 4.75, "y": 1189.5701655720245, "is_sample": false, "parent": 18, "n_below": 4}, {"id": 12, "x": 0.5, "y": 3555.7404654546854, "is_sample": false, "parent": 14, "n_below": 2}, {"id": 14, "x": 1.25, "y": 9391.852297737321, "is_sample": false, "parent": 18, "n_below": 3}, {"id": 18, "x": 3.0, "y": 34688.06810387311, "is_sample": false, "parent": 19, "n_below": 7}, {"id": 19, "x": 4.5, "y": 42923.79783658233, "is_sample": false, "parent": null, "n_below": 8}], "mutations": [{"pos": 45123.0, "node": 0, "derived": "T", "anc": "A"}, {"pos": 48285.0, "node": 11, "derived": "G", "anc": "T"}, {"pos": 48484.0, "node": 6, "derived": "C", "anc": "G"}, {"pos": 49100.0, "node": 2, "derived": "A", "anc": "T"}, {"pos": 49570.0, "node": 2, "derived": "A", "anc": "C"}], "tmrca": 42923.79783658233, "total_branch_length": 136280.64971587394, "changed_nodes": [0, 1, 6, 12, 13]}], "sites": [{"idx": 0, "pos": 1194.0, "node": 15, "tree": 0, "carriers": [0, 2, 3, 4, 5, 7], "freq": 0.75}, {"idx": 1, "pos": 2940.0, "node": 6, "tree": 0, "carriers": [6], "freq": 0.125}, {"idx": 2, "pos": 8741.0, "node": 13, "tree": 1, "carriers": [1, 6], "freq": 0.25}, {"idx": 3, "pos": 11604.0, "node": 1, "tree": 1, "carriers": [1], "freq": 0.125}, {"idx": 4, "pos": 20073.0, "node": 11, "tree": 1, "carriers": [2, 3, 4, 5, 7], "freq": 0.625}, {"idx": 5, "pos": 20299.0, "node": 0, "tree": 1, "carriers": [0], "freq": 0.125}, {"idx": 6, "pos": 20578.0, "node": 0, "tree": 1, "carriers": [0], "freq": 0.125}, {"idx": 7, "pos": 22843.0, "node": 13, "tree": 1, "carriers": [1, 6], "freq": 0.25}, {"idx": 8, "pos": 23937.0, "node": 6, "tree": 2, "carriers": [6], "freq": 0.125}, {"idx": 9, "pos": 26324.0, "node": 0, "tree": 3, "carriers": [0], "freq": 0.125}, {"idx": 10, "pos": 27354.0, "node": 2, "tree": 3, "carriers": [2], "freq": 0.125}, {"idx": 11, "pos": 27655.0, "node": 11, "tree": 3, "carriers": [3, 4, 5, 7], "freq": 0.5}, {"idx": 12, "pos": 29394.0, "node": 6, "tree": 3, "carriers": [6], "freq": 0.125}, {"idx": 13, "pos": 29720.0, "node": 18, "tree": 3, "carriers": [0, 2, 3, 4, 5, 7], "freq": 0.75}, {"idx": 14, "pos": 29791.0, "node": 14, "tree": 3, "carriers": [0, 2], "freq": 0.25}, {"idx": 15, "pos": 30865.0, "node": 14, "tree": 3, "carriers": [0, 2], "freq": 0.25}, {"idx": 16, "pos": 32996.0, "node": 0, "tree": 3, "carriers": [0], "freq": 0.125}, {"idx": 17, "pos": 34295.0, "node": 14, "tree": 3, "carriers": [0, 2], "freq": 0.25}, {"idx": 18, "pos": 35568.0, "node": 11, "tree": 3, "carriers": [3, 4, 5, 7], "freq": 0.5}, {"idx": 19, "pos": 35605.0, "node": 11, "tree": 3, "carriers": [3, 4, 5, 7], "freq": 0.5}, {"idx": 20, "pos": 36112.0, "node": 13, "tree": 3, "carriers": [1, 6], "freq": 0.25}, {"idx": 21, "pos": 36378.0, "node": 0, "tree": 3, "carriers": [0], "freq": 0.125}, {"idx": 22, "pos": 37905.0, "node": 13, "tree": 4, "carriers": [1, 6], "freq": 0.25}, {"idx": 23, "pos": 38012.0, "node": 17, "tree": 4, "carriers": [1, 3, 4, 5, 6, 7], "freq": 0.75}, {"idx": 24, "pos": 38487.0, "node": 14, "tree": 4, "carriers": [0, 2], "freq": 0.25}, {"idx": 25, "pos": 41016.0, "node": 6, "tree": 5, "carriers": [6], "freq": 0.125}, {"idx": 26, "pos": 41757.0, "node": 13, "tree": 5, "carriers": [1, 6], "freq": 0.25}, {"idx": 27, "pos": 41808.0, "node": 11, "tree": 5, "carriers": [3, 4, 5, 7], "freq": 0.5}, {"idx": 28, "pos": 42232.0, "node": 14, "tree": 5, "carriers": [0, 2], "freq": 0.25}, {"idx": 29, "pos": 43350.0, "node": 11, "tree": 5, "carriers": [3, 4, 5, 7], "freq": 0.5}, {"idx": 30, "pos": 45123.0, "node": 0, "tree": 6, "carriers": [0], "freq": 0.125}, {"idx": 31, "pos": 48285.0, "node": 11, "tree": 6, "carriers": [3, 4, 5, 7], "freq": 0.5}, {"idx": 32, "pos": 48484.0, "node": 6, "tree": 6, "carriers": [6], "freq": 0.125}, {"idx": 33, "pos": 49100.0, "node": 2, "tree": 6, "carriers": [2], "freq": 0.125}, {"idx": 34, "pos": 49570.0, "node": 2, "tree": 6, "carriers": [2], "freq": 0.125}], "genotypes": [[1, 0, 1, 1, 1, 1, 0, 1], [0, 0, 0, 0, 0, 0, 1, 0], [0, 1, 0, 0, 0, 0, 1, 0], [0, 1, 0, 0, 0, 0, 0, 0], [0, 0, 1, 1, 1, 1, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0], [1, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 0, 1, 0], [1, 0, 0, 0, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 1, 1, 1, 0, 1], [0, 0, 0, 0, 0, 0, 1, 0], [1, 0, 1, 1, 1, 1, 0, 1], [1, 0, 1, 0, 0, 0, 0, 0], [1, 0, 1, 0, 0, 0, 0, 0], [1, 0, 0, 0, 0, 0, 0, 0], [1, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 1, 1, 1, 0, 1], [0, 0, 0, 1, 1, 1, 0, 1], [0, 1, 0, 0, 0, 0, 1, 0], [1, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 1, 0], [0, 1, 0, 1, 1, 1, 1, 1], [1, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 1, 0], [0, 1, 0, 0, 0, 0, 1, 0], [0, 0, 0, 1, 1, 1, 0, 1], [1, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 1, 1, 1, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 1, 1, 1, 0, 1], [0, 0, 0, 0, 0, 0, 1, 0], [0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0, 0, 0]], "num_trees": 7, "num_sites": 35, "num_edges": 35, "num_nodes": 20}</script>
+<script>
+(function(){
+"use strict";
+var D = JSON.parse(document.getElementById("argdata").textContent);
+var N = D.n_samples, L = D.seq_len;
+var TMAX = 0;
+D.trees.forEach(function(t){ t.nodes.forEach(function(n){ if(n.y>TMAX) TMAX=n.y; }); });
+
+var state = { pos: 26000, tsqrt: true, site: null, node: null, a: 2, b: 4 };
+
+function treeAt(p){
+  for(var i=0;i<D.trees.length;i++){ if(D.trees[i].left<=p && p<D.trees[i].right) return i; }
+  return D.trees.length-1;
+}
+function nodeMap(t){ var m={}; t.nodes.forEach(function(n){ m[n.id]=n; }); return m; }
+function childrenOf(t){
+  var c={}; t.nodes.forEach(function(n){ if(n.parent!==null){ (c[n.parent]=c[n.parent]||[]).push(n.id); } });
+  return c;
+}
+function leavesUnder(t, id){
+  var ch = childrenOf(t), out = [], stack=[id];
+  while(stack.length){ var u=stack.pop(); var kids=ch[u];
+    if(!kids){ out.push(u); } else { kids.forEach(function(k){ stack.push(k); }); } }
+  return out;
+}
+function tmrcaPair(t, a, b){
+  var m = nodeMap(t), seen = {}, u = a;
+  while(u!==null && u!==undefined){ seen[u]=true; u = m[u] ? m[u].parent : null; }
+  u = b;
+  while(u!==null && u!==undefined){ if(seen[u]) return m[u].y; u = m[u] ? m[u].parent : null; }
+  return TMAX;
+}
+function yOf(time, top, bot){
+  var f = TMAX>0 ? (state.tsqrt ? Math.sqrt(time/TMAX) : time/TMAX) : 0;
+  return bot - f*(bot-top);
+}
+function el(tag, attrs, text){
+  var e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for(var k in attrs){ if(attrs[k]!==null && attrs[k]!==undefined) e.setAttribute(k, attrs[k]); }
+  if(text!==undefined && text!==null) e.textContent = text;
+  return e;
+}
+function fmt(n){ return Math.round(n).toLocaleString("en-US"); }
+
+/* ---------------------------------------------------------------- ruler */
+var ruler = document.getElementById("ruler");
+function drawRuler(){
+  ruler.textContent = "";
+  var x0=42, x1=878, yb=50, h=20;
+  var sx = function(p){ return x0 + (p/L)*(x1-x0); };
+  var cur = treeAt(state.pos);
+  D.trees.forEach(function(t,i){
+    var w = sx(t.right)-sx(t.left);
+    ruler.appendChild(el("rect",{x:sx(t.left),y:yb,width:Math.max(w,1),height:h,
+      fill:i===cur?"var(--accent)":"var(--sunk)",stroke:"var(--rule)","stroke-width":1}));
+    if(w>26) ruler.appendChild(el("text",{x:sx(t.left)+w/2,y:yb+14,"text-anchor":"middle",
+      fill:i===cur?"#fff":"var(--ink-3)","font-family":"var(--mono)","font-size":10},"T"+i));
+  });
+  D.sites.forEach(function(s){
+    var on = state.site===s.idx;
+    ruler.appendChild(el("line",{x1:sx(s.pos),y1:yb+h+3,x2:sx(s.pos),y2:yb+h+(on?15:10),
+      stroke:on?"var(--accent)":"var(--derived)","stroke-width":on?2.5:1.4}));
+  });
+  ruler.appendChild(el("text",{x:x0,y:97,fill:"var(--ink-3)","font-family":"var(--mono)","font-size":10},"0"));
+  ruler.appendChild(el("text",{x:x1,y:97,"text-anchor":"end",fill:"var(--ink-3)",
+    "font-family":"var(--mono)","font-size":10},fmt(L)+" bp"));
+  ruler.appendChild(el("text",{x:x0,y:22,fill:"var(--ink-3)","font-family":"var(--mono)",
+    "font-size":10},"local trees"));
+  ruler.appendChild(el("text",{x:x1,y:22,"text-anchor":"end",fill:"var(--ink-3)",
+    "font-family":"var(--mono)","font-size":10},D.num_sites+" variants"));
+  var px = sx(state.pos);
+  ruler.appendChild(el("line",{x1:px,y1:yb-12,x2:px,y2:yb+h+18,stroke:"var(--ink)","stroke-width":2}));
+  ruler.appendChild(el("circle",{cx:px,cy:yb-14,r:4,fill:"var(--ink)"}));
+}
+
+/* ---------------------------------------------------------------- tree */
+var treeSvg = document.getElementById("tree");
+function drawTree(){
+  treeSvg.textContent = "";
+  var ti = treeAt(state.pos), t = D.trees[ti], m = nodeMap(t);
+  var padL=40,padR=16,padT=22,padB=38, W=470, H=372, top=padT, bot=H-padB;
+  var lx = function(i){ return padL + i*(W-padL-padR)/(N-1); };
+  /* time axis ticks */
+  [0,.25,.5,.75,1].forEach(function(f){
+    var time = state.tsqrt ? TMAX*f*f : TMAX*f;
+    var y = yOf(time, top, bot);
+    treeSvg.appendChild(el("line",{x1:padL-6,y1:y,x2:W-padR,y2:y,stroke:"var(--rule-2)","stroke-width":1}));
+    treeSvg.appendChild(el("text",{x:padL-9,y:y+3,"text-anchor":"end",fill:"var(--ink-3)",
+      "font-family":"var(--mono)","font-size":9},fmt(time)));
+  });
+  treeSvg.appendChild(el("text",{x:4,y:14,fill:"var(--ink-3)","font-family":"var(--mono)",
+    "font-size":9},"generations ago"));
+  /* highlighted clade */
+  var hiLeaves = {}, hiNode = state.node;
+  if(state.site!==null){ var s=D.sites[state.site]; if(s.tree===ti) hiNode = s.node; }
+  if(hiNode!==null && hiNode!==undefined && m[hiNode]){
+    leavesUnder(t, hiNode).forEach(function(u){ hiLeaves[u]=true; });
+  }
+  /* edges */
+  t.nodes.forEach(function(n){
+    if(n.parent===null) return;
+    var p = m[n.parent];
+    var x1=lx(n.x), y1=yOf(n.y,top,bot), x2=lx(p.x), y2=yOf(p.y,top,bot);
+    var isHi = (hiNode!==null && hiNode!==undefined && n.id===hiNode);
+    var isChanged = t.changed_nodes && t.changed_nodes.indexOf(n.id)>=0;
+    treeSvg.appendChild(el("path",{d:"M"+x1+","+y1+" L"+x1+","+y2+" L"+x2+","+y2,
+      fill:"none",stroke:isHi?"var(--accent)":(isChanged?"var(--changed)":"var(--ink-3)"),
+      "stroke-width":isHi?3.4:(isChanged?2:1.3),"stroke-linejoin":"round"}));
+  });
+  /* mutations on edges */
+  var byEdge = {};
+  t.mutations.forEach(function(mu){ (byEdge[mu.node]=byEdge[mu.node]||[]).push(mu); });
+  Object.keys(byEdge).forEach(function(nid){
+    var n=m[nid]; if(!n || n.parent===null) return;
+    var p=m[n.parent], list=byEdge[nid];
+    var y1=yOf(n.y,top,bot), y2=yOf(p.y,top,bot), x=lx(n.x);
+    list.forEach(function(mu,k){
+      var f=(k+1)/(list.length+1), cy=y1+(y2-y1)*f;
+      var site = D.sites.filter(function(s){ return s.pos===mu.pos; })[0];
+      var on = site && state.site===site.idx;
+      var c = el("circle",{cx:x,cy:cy,r:on?6:4.2,fill:"var(--derived)",
+        stroke:"var(--surface)","stroke-width":1.6,style:"cursor:pointer"});
+      if(site){
+        c.addEventListener("mouseenter",function(){ state.site=site.idx; render(); });
+        c.addEventListener("mouseleave",function(){ state.site=null; render(); });
+      }
+      treeSvg.appendChild(c);
+    });
+  });
+  /* leaves */
+  for(var i=0;i<N;i++){
+    var x=lx(i), y=yOf(0,top,bot), hot=!!hiLeaves[D.sample_ids[i]];
+    treeSvg.appendChild(el("rect",{x:x-8,y:y,width:16,height:16,rx:2,
+      fill:hot?"var(--accent)":"var(--sunk)",stroke:hot?"var(--accent)":"var(--rule)","stroke-width":1}));
+    treeSvg.appendChild(el("text",{x:x,y:y+12,"text-anchor":"middle",
+      fill:hot?"#fff":"var(--ink-2)","font-family":"var(--mono)","font-size":10},String(i)));
+  }
+  treeSvg.appendChild(el("text",{x:padL,y:H-8,fill:"var(--ink-3)","font-family":"var(--mono)",
+    "font-size":9},"haplotype"));
+  var changedTxt = t.changed_nodes ? t.changed_nodes.length+" nodes moved since T"+(ti-1) : "first tree";
+  document.getElementById("treenote").innerHTML =
+    "<b>T"+ti+"</b> spans "+fmt(t.left)+"&ndash;"+fmt(t.right)+" bp. TMRCA <b>"+fmt(t.tmrca)+
+    "</b> generations, total branch length <b>"+fmt(t.total_branch_length)+"</b>. "+
+    "Branches in pink are the ones that changed at the last breakpoint ("+changedTxt+").";
+}
+
+/* ---------------------------------------------------------------- matrix */
+var mat = document.getElementById("mat");
+function drawMatrix(){
+  mat.textContent="";
+  var padL=40,padT=46,W=470,H=248;
+  var nS=D.sites.length, cw=(W-padL-10)/nS, ch=(H-padT-14)/N;
+  var ti = treeAt(state.pos);
+  /* tree band */
+  D.sites.forEach(function(s,i){
+    mat.appendChild(el("rect",{x:padL+i*cw,y:padT-16,width:Math.max(cw-0.6,0.6),height:9,
+      fill:s.tree===ti?"var(--accent)":"var(--rule)"}));
+  });
+  mat.appendChild(el("text",{x:padL,y:padT-22,fill:"var(--ink-3)","font-family":"var(--mono)",
+    "font-size":9},"local tree"));
+  mat.appendChild(el("text",{x:4,y:padT+10,fill:"var(--ink-3)","font-family":"var(--mono)",
+    "font-size":9},"hap"));
+  /* cells */
+  for(var r=0;r<N;r++){
+    mat.appendChild(el("text",{x:padL-7,y:padT+r*ch+ch*0.72,"text-anchor":"end",fill:"var(--ink-2)",
+      "font-family":"var(--mono)","font-size":10},String(r)));
+    for(var c=0;c<nS;c++){
+      var v = D.genotypes[c][r];
+      var hot = state.site===c;
+      mat.appendChild(el("rect",{x:padL+c*cw,y:padT+r*ch,width:Math.max(cw-0.6,0.6),
+        height:Math.max(ch-0.8,1),
+        fill:v?"var(--derived)":"var(--sunk)",
+        stroke:hot?"var(--accent)":"none","stroke-width":hot?1.2:0,
+        opacity:(state.site===null||hot)?1:0.45}));
+    }
+  }
+  /* hit areas */
+  D.sites.forEach(function(s,i){
+    var hit = el("rect",{x:padL+i*cw,y:padT-18,width:Math.max(cw,2),height:N*ch+20,
+      fill:"transparent",style:"cursor:pointer"});
+    hit.addEventListener("mouseenter",function(){ state.site=i; render(); });
+    hit.addEventListener("mouseleave",function(){ state.site=null; render(); });
+    hit.addEventListener("click",function(){ state.pos=Math.round(s.pos); sync(); render(); });
+    mat.appendChild(hit);
+  });
+  var note;
+  if(state.site===null){
+    note = "Each column is one variant, each row one haplotype. Orange means the derived allele. "+
+           "Hover a column to light up the branch it sits on; click to move the marker there.";
+  } else {
+    var s=D.sites[state.site];
+    note = "Variant at <b>"+fmt(s.pos)+" bp</b> sits on the branch above node <b>"+s.node+
+      "</b> in <b>T"+s.tree+"</b>. Carried by <b>"+s.carriers.length+" of "+N+
+      "</b> haplotypes ("+s.carriers.join(", ")+"), frequency <b>"+s.freq.toFixed(3)+"</b>."+
+      (s.tree===ti ? "" : " That tree is not the one on display &mdash; click to jump to it.");
+  }
+  document.getElementById("matnote").innerHTML = note;
+}
+
+/* ---------------------------------------------------------------- pair track */
+var pair = document.getElementById("pair");
+function drawPair(){
+  pair.textContent="";
+  var x0=56,x1=878,top=22,bot=160,W=900;
+  var sx=function(p){ return x0+(p/L)*(x1-x0); };
+  var sy=function(t){ var f=state.tsqrt?Math.sqrt(t/TMAX):t/TMAX; return bot-f*(bot-top); };
+  [0,.25,.5,.75,1].forEach(function(f){
+    var time=state.tsqrt?TMAX*f*f:TMAX*f, y=sy(time);
+    pair.appendChild(el("line",{x1:x0,y1:y,x2:x1,y2:y,stroke:"var(--rule-2)","stroke-width":1}));
+    pair.appendChild(el("text",{x:x0-8,y:y+3,"text-anchor":"end",fill:"var(--ink-3)",
+      "font-family":"var(--mono)","font-size":9},fmt(time)));
+  });
+  pair.appendChild(el("text",{x:4,y:12,fill:"var(--ink-3)","font-family":"var(--mono)",
+    "font-size":9},"TMRCA (generations)"));
+  var dpath="", sum=0, span=0;
+  D.trees.forEach(function(t,i){
+    var y=sy(tmrcaPair(t,state.a,state.b));
+    dpath += (i===0?"M":"L")+sx(t.left)+","+y+" L"+sx(t.right)+","+y;
+    sum += tmrcaPair(t,state.a,state.b)*(t.right-t.left); span += (t.right-t.left);
+    pair.appendChild(el("line",{x1:sx(t.left),y1:top-6,x2:sx(t.left),y2:bot,
+      stroke:"var(--rule)","stroke-width":1,"stroke-dasharray":"2 3"}));
+  });
+  pair.appendChild(el("path",{d:dpath,fill:"none",stroke:"var(--accent)","stroke-width":2.4,
+    "stroke-linejoin":"round","stroke-linecap":"round"}));
+  var mean=sum/span, ym=sy(mean);
+  pair.appendChild(el("line",{x1:x0,y1:ym,x2:x1,y2:ym,stroke:"var(--changed)","stroke-width":1.6,
+    "stroke-dasharray":"6 4"}));
+  var mlab = "genome mean "+fmt(mean);
+  pair.appendChild(el("rect",{x:x1-mlab.length*6.1-4,y:ym-17,width:mlab.length*6.1+6,height:14,
+    fill:"var(--surface)",rx:2}));
+  pair.appendChild(el("text",{x:x1,y:ym-6,"text-anchor":"end",fill:"var(--changed)",
+    "font-family":"var(--mono)","font-size":10},mlab));
+  var px=sx(state.pos);
+  pair.appendChild(el("line",{x1:px,y1:top-10,x2:px,y2:bot+6,stroke:"var(--ink)","stroke-width":2}));
+  pair.appendChild(el("text",{x:x0,y:bot+26,fill:"var(--ink-3)","font-family":"var(--mono)",
+    "font-size":10},"0"));
+  pair.appendChild(el("text",{x:x1,y:bot+26,"text-anchor":"end",fill:"var(--ink-3)",
+    "font-family":"var(--mono)","font-size":10},fmt(L)+" bp"));
+  var here=tmrcaPair(D.trees[treeAt(state.pos)],state.a,state.b);
+  var lo=Infinity,hi=0;
+  D.trees.forEach(function(t){ var v=tmrcaPair(t,state.a,state.b); if(v<lo)lo=v; if(v>hi)hi=v; });
+  document.getElementById("pairnote").innerHTML =
+    "Haplotypes <b>"+state.a+"</b> and <b>"+state.b+"</b> coalesce <b>"+fmt(here)+
+    "</b> generations ago at the marker, and anywhere from <b>"+fmt(lo)+"</b> to <b>"+fmt(hi)+
+    "</b> across the genome &mdash; a "+(hi/Math.max(lo,1)).toFixed(1)+
+    "&times; range. The dashed line is the length-weighted mean, which is what a relatedness "+
+    "matrix stores as a single number for this pair.";
+}
+
+/* ---------------------------------------------------------------- wiring */
+function render(){ drawRuler(); drawTree(); drawMatrix(); drawPair(); drawReadout(); }
+function drawReadout(){
+  var ti=treeAt(state.pos), t=D.trees[ti];
+  document.getElementById("ro").innerHTML =
+    "position <b>"+fmt(state.pos)+" bp</b>"+
+    "<span>tree <b>T"+ti+"</b> of "+D.num_trees+"</span>"+
+    "<span>interval <b>"+fmt(t.left)+"&ndash;"+fmt(t.right)+"</b></span>"+
+    "<span>variants here <b>"+t.mutations.length+"</b></span>";
+}
+var posEl=document.getElementById("pos");
+function sync(){ posEl.value=state.pos; }
+posEl.addEventListener("input",function(){ state.pos=+posEl.value; render(); });
+document.getElementById("tscale").addEventListener("click",function(){
+  state.tsqrt=!state.tsqrt;
+  this.setAttribute("aria-pressed",String(state.tsqrt));
+  this.textContent = state.tsqrt ? "square root" : "linear";
+  render();
+});
+function dragRuler(ev){
+  var r=ruler.getBoundingClientRect();
+  var vx=((ev.clientX-r.left)/r.width)*900;
+  state.pos=Math.max(0,Math.min(L,Math.round(((vx-42)/(878-42))*L)));
+  sync(); render();
+}
+ruler.addEventListener("pointerdown",function(ev){
+  ruler.setPointerCapture(ev.pointerId); dragRuler(ev);
+  ruler.onpointermove=dragRuler;
+});
+ruler.addEventListener("pointerup",function(ev){
+  ruler.onpointermove=null;
+  try{ ruler.releasePointerCapture(ev.pointerId); }catch(e){}
+});
+var sa=document.getElementById("sa"), sb=document.getElementById("sb");
+for(var i=0;i<N;i++){
+  sa.appendChild(new Option("haplotype "+i,i));
+  sb.appendChild(new Option("haplotype "+i,i));
+}
+sa.value=state.a; sb.value=state.b;
+sa.addEventListener("change",function(){ state.a=+sa.value; render(); });
+sb.addEventListener("change",function(){ state.b=+sb.value; render(); });
+sync(); render();
+})();
+</script>
+</body>
+</html>
